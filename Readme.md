@@ -2,47 +2,69 @@
 
 ## 1. Tổng quan & Phương pháp
 
-Báo cáo này tổng hợp kết quả đánh giá hiệu năng của hai mô hình/hệ thống Text-to-SQL trên tập dữ liệu tiếng Việt `Vitext2sql`.
+### Mục tiêu
+Benchmark nội bộ (Internal bench) nhằm đánh giá khả năng của các mô hình trong kịch bản **low-resource** và **tiếng Việt**, hướng tới thử nghiệm cho production.
 
-### Thông tin Dataset & Môi trường
-- **Dataset**: `Vitext2sql` (các câu hỏi tiếng Việt mức độ âm tiết).
-- **Phương pháp đánh giá (Evaluation Mode)**: **Execution-based**.
-    - Câu lệnh SQL sinh ra được thực thi trên database SQLite thực tế.
-    - Kết quả trả về được so sánh 1:1 với kết quả của câu lệnh Gold SQL.
-    - **Strict Match**: Kết quả thực thi hoàn toàn khớp.
-    - **Loose Match**: (Nếu có) Kết quả khớp nhưng có thể khác biệt nhỏ (ví dụ thứ tự dòng nếu không có ORDER BY), hoặc điểm AI chấm cao.
-- **Hệ thống so sánh**:
-    1. **Qwen3-8B INT8 (TensorSQL)**: Hệ thống baseline/Qwen3-8B INT8 hiện tại.
-    2. **DeepSeek-V3**: Mô hình DeepSeek được benchmark qua API.
+### Thách thức
+1. **Low-resource**: Giới hạn về tài nguyên tính toán (GPU memory, chi phí vận hành).
+2. **Thiếu model chuyên biệt**: Chưa có nhiều model Text-to-SQL mạnh mẽ hỗ trợ tốt tiếng Việt.
+
+### Giải pháp: Agent Pipeline
+Để giải quyết hai khó khăn trên, chúng tôi áp dụng phương pháp **Agent Pipeline** kết hợp với **General Purpose Model** (Qwen3-8B INT8).
+- Thay vì finetune một model lớn (tốn kém) hoặc dùng model API (vấn đề chi phí/bảo mật), chúng tôi sử dụng model 8B chạy local.
+- Bù đắp sự thiếu hụt tri thức chuyên sâu bằng quy trình agent nhiều bước (Reasoning -> Generation -> Refinement).
+
+### Cấu hình Hệ thống
+1. **Qwen3-8B INT8 (Agent Pipeline)**
+   - **Environment**: Local Server
+   - **GPU**: NVIDIA A4000
+   - **CPU**: 4 vCPU
+   - **RAM**: 21GB
+   - **Phương pháp**: Agent Pipeline (Multi-step reasoning)
+
+2. **DeepSeek-V3 658B (Single-shot via API)**
+   - **Environment**: API Call
+   - **Model Size**: ~658B Params (MoE)
+   - **Phương pháp**: Single-shot Inference
+
+### Dataset & Đánh giá
+- **Dataset**: `ViText2SQL` (Mức độ âm tiết).
+- **Metric**: Execution-based Evaluation.
+  - **Strict Match**: Kết quả thực thi chính xác hoàn toàn.
+  - **Loose Match**: Kết quả logic chấp nhận được (thư giãn về thứ tự, định dạng).
+
+---
 
 ## 2. Kết quả Thống kê
 
-Dưới đây là bảng so sánh hiệu năng giữa hai mô hình dựa trên log kết quả benchmark.
-
-| Chỉ số | Qwen3-8B INT8 (TensorSQL) | DeepSeek-V3 |
-| :--- | :--- | :--- |
-| **Tổng số câu hỏi (Total)** | 1499 | 1500 |
-| **Độ chính xác (Strict Accuracy)** | **58.44%** (876/1499) | **58.13%** (872/1500) |
-| **Độ chính xác mở rộng (Loose/AI)** | 58.44% | 51.47% (*) |
-| **Thời gian trung bình (Avg Duration)** | ~64,780 ms (64.78s) | **~2,049 ms (2.05s)** |
-| **Điểm trung bình (Avg Score)** | 77.43 | 80.82 |
+| Chỉ số | Qwen3-8B INT8 (Agent) | DeepSeek-V3 658B (API) |
+|--------|-----------------------|------------------------|
+| **Tổng mẫu (Samples)** | 1499 | 1499 |
+| **Strict Accuracy** | **58.44%** (876/1499) | **62.37%** (935/1499) |
+| **Loose Accuracy** | 58.44% | 62.91% |
+| **Thời gian trung bình** | ~64.78s | ~2.09s |
+| **Điểm trung bình (Score)** | 77.43 | 81.01 |
 | **Số lỗi (Errors)** | 48 | 0 |
 
-(*) *Lưu ý: Chỉ số Loose Match của DeepSeek thấp hơn có thể do cách tính toán strict/loose trong script benchmark khác nhau hoặc do DeepSeek trả về kết quả đúng về mặt logic nhưng sai về mặt định dạng (ví dụ: thừa cột, sai tên cột) khiến việc so sánh execution thất bại ở mức độ lỏng.*
+---
 
-## 3. Phân tích chi tiết
+## 3. Phân tích
 
-### Hiệu năng (Performance)
-- **Độ chính xác**: Hai mô hình có độ chính xác Execution-based gần như tương đương nhau (~58%). Qwen3-8B INT8 nhỉnh hơn một chút (0.31%).
-- **Tốc độ**: **DeepSeek-V3 nhanh hơn vượt trội**, chỉ mất trung bình **2 giây** cho mỗi câu hỏi, trong khi Qwen3-8B INT8 mất tới **~65 giây**. Điều này cho thấy Qwen3-8B INT8 có thể đang chạy một quy trình rất nặng (ví dụ: suy luận local model lớn, hoặc agentic loop nhiều bước, hoặc retry nhiều lần).
+### 3.1. Hiệu năng & Chất lượng (Accuracy)
+- **DeepSeek-V3** (658B) đạt độ chính xác cao hơn (**62.37%** vs 58.44%), khẳng định sức mạnh của các model khổng lồ (Large Language Models) so với model nhỏ 8B.
+- Tuy nhiên, **Qwen3-8B INT8** với Agent Pipeline bám đuổi khá sát (chênh lệch ~4%), cho thấy tiềm năng lớn của phương pháp Agentic Workflow. Model 8B thông thường khó đạt được mức này nếu chỉ dùng single-shot.
 
-### Độ ổn định (Stability)
-- **DeepSeek-V3**: Không ghi nhận lỗi (Errors = 0) trong quá trình benchmark.
-- **Qwen3-8B INT8**: Có **48 lỗi** xảy ra (chiếm ~3.2%), có thể do timeout, lỗi kết nối hoặc crash trong quá trình xử lý phức tạp.
+### 3.2. Tốc độ & Tài nguyên
+- **Latency**: DeepSeek nhanh hơn vượt trội (~2s so với ~65s của Agent).
+  - Agent Pipeline tốn thời gian cho nhiều bước suy luận và tự sửa lỗi (Self-correction).
+- **Resource**:
+  - Qwen3-8B chạy mượt mà trên **1 GPU A4000** (cấu hình tầm trung/thấp), phù hợp deploy on-premise hoặc edge server.
+  - DeepSeek đòi hỏi cluster lớn hoặc lệ thuộc API.
 
-## 4. Kết luận
-- Nếu ưu tiên **tốc độ phản hồi**, **DeepSeek-V3** là lựa chọn tối ưu với độ chính xác ngang ngửa hệ thống hiện tại nhưng nhanh hơn gấp 30 lần.
-- Hệ thống **Qwen3-8B INT8** hiện tại dù chậm hơn nhiều nhưng vẫn duy trì độ chính xác cạnh tranh. Cần xem xét tối ưu hóa thời gian thực thi của Qwen3-8B INT8 nếu muốn đưa vào ứng dụng thực tế thời gian thực.
+### 3.3. Kết luận
+- **Production Scenario**: Nếu cần real-time thấp (<5s), DeepSeek hoặc model lớn qua API là bắt buộc.
+- **Low-resource / On-premise**: Với cấu hình giới hạn, **Qwen3-8B Agent** là giải pháp khả thi, đánh đổi thời gian phản hồi (latency) lấy sự tự chủ về hạ tầng và chi phí thấp, trong khi vẫn duy trì độ chính xác chấp nhận được (gần 60%).
 
 ---
-*Dữ liệu được trích xuất từ logs ngày 19/02/2026.*
+
+*Cập nhật: 19/02/2026*
