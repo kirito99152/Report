@@ -31,7 +31,6 @@ Benchmark nội bộ (Internal bench) nhằm đánh giá khả năng của các 
 - **Dataset**: `ViText2SQL` (Mức độ âm tiết).
 - **Metric**: Execution-based Evaluation.
   - **Strict Match**: Kết quả thực thi chính xác hoàn toàn.
-  - **Loose Match**: Kết quả logic chấp nhận được (thư giãn về thứ tự, định dạng).
 
 ---
 
@@ -41,7 +40,6 @@ Benchmark nội bộ (Internal bench) nhằm đánh giá khả năng của các 
 |--------|-----------------------|------------------------|
 | **Tổng mẫu (Samples)** | 1499 | 1499 |
 | **Strict Accuracy** | **58.44%** (876/1499) | **62.37%** (935/1499) |
-| **Loose Accuracy** | 58.44% | 62.91% |
 | **Thời gian trung bình** | ~64.78s | ~2.09s |
 | **Điểm trung bình (Score)** | 77.43 | 81.01 |
 | **Số lỗi (Errors)** | 48 | 0 |
